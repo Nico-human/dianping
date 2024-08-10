@@ -32,8 +32,9 @@ public class ShopController {
      * @return 商铺详情数据
      */
     @GetMapping("/{id}")
-    public Result queryShopById(@PathVariable("id") Long id) {
-        return Result.ok(shopService.getById(id));
+    public Result<Shop> queryShopById(@PathVariable("id") Long id) {
+        Shop shop = shopService.queryShopById(id);
+        return shop == null ? Result.fail("店铺不存在") : Result.ok(shop);
     }
 
     /**
@@ -42,7 +43,7 @@ public class ShopController {
      * @return 商铺id
      */
     @PostMapping
-    public Result saveShop(@RequestBody Shop shop) {
+    public Result<Long> saveShop(@RequestBody Shop shop) {
         // 写入数据库
         shopService.save(shop);
         // 返回店铺id
@@ -55,10 +56,10 @@ public class ShopController {
      * @return 无
      */
     @PutMapping
-    public Result updateShop(@RequestBody Shop shop) {
+    public Result<String> updateShop(@RequestBody Shop shop) {
         // 写入数据库
-        shopService.updateById(shop);
-        return Result.ok();
+        Boolean isUpdated = shopService.updateShop(shop);
+        return isUpdated ? Result.ok() : Result.fail("店铺id不能为空");
     }
 
     /**
