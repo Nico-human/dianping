@@ -27,4 +27,6 @@ public interface IShopService extends IService<Shop> {
      */
     Boolean updateShop(Shop shop);
 
+    void saveShop2Redis(Long id, Long expireTime);
+
 }
