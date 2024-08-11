@@ -4,6 +4,8 @@ import com.hmdp.dto.Result;
 import com.hmdp.entity.Voucher;
 import com.baomidou.mybatisplus.extension.service.IService;
 
+import java.util.List;
+
 /**
  * <p>
  *  服务类
@@ -14,7 +16,7 @@ import com.baomidou.mybatisplus.extension.service.IService;
  */
 public interface IVoucherService extends IService<Voucher> {
 
-    Result queryVoucherOfShop(Long shopId);
+    List<Voucher> queryVoucherOfShop(Long shopId);
 
     void addSeckillVoucher(Voucher voucher);
 }
