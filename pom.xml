@@ -67,6 +67,7 @@
             <artifactId>redisson</artifactId>
             <version>3.13.6</version>
         </dependency>
+
     </dependencies>
 
     <build>
