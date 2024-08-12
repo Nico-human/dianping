@@ -8,12 +8,17 @@ import com.hmdp.mapper.VoucherOrderMapper;
 import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisIdWorker;
+import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.aop.framework.AopContext;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.concurrent.TimeUnit;
 
 /**
  * <p>
@@ -29,11 +34,18 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     private final SeckillVoucherMapper seckillVoucherMapper;
     private final RedisIdWorker redisIdWorker;
     private final VoucherOrderMapper voucherOrderMapper;
+    private final StringRedisTemplate stringRedisTemplate;
+    private final RedissonClient redissonClient;
 
-    public VoucherOrderServiceImpl(SeckillVoucherMapper seckillVoucherMapper, RedisIdWorker redisIdWorker, VoucherOrderMapper voucherOrderMapper) {
+    public VoucherOrderServiceImpl(SeckillVoucherMapper seckillVoucherMapper,
+                                   RedisIdWorker redisIdWorker,
+                                   VoucherOrderMapper voucherOrderMapper,
+                                   StringRedisTemplate stringRedisTemplate, RedissonClient redissonClient) {
         this.seckillVoucherMapper = seckillVoucherMapper;
         this.redisIdWorker = redisIdWorker;
         this.voucherOrderMapper = voucherOrderMapper;
+        this.stringRedisTemplate = stringRedisTemplate;
+        this.redissonClient = redissonClient;
     }
 
     @Override
@@ -53,28 +65,65 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         }
 
         /**
-        // 扣减库存 错误示例
-        // 原因: 先查库存, 再减库存
-        // 高并发时查到的是旧库存, 旧库存覆盖新库存导致超卖
-        // LambdaUpdateWrapper<SeckillVoucher> wrapper = new LambdaUpdateWrapper<>();
-        // wrapper.eq(SeckillVoucher::getVoucherId, voucherId);
-        // wrapper.gt(SeckillVoucher::getStock, 0);
-        // seckillVoucher.setStock(seckillVoucher.getStock() - 1);
-        // int rows = seckillVoucherMapper.update(seckillVoucher, wrapper);
-        // if (rows != 1) {
-        //     return null;
-        // }
+         *
+        扣减库存 错误示例
+        原因: 先查库存, 再减库存
+        高并发时查到的是旧库存, 旧库存覆盖新库存导致超卖
+        LambdaUpdateWrapper<SeckillVoucher> wrapper = new LambdaUpdateWrapper<>();
+        wrapper.eq(SeckillVoucher::getVoucherId, voucherId);
+        wrapper.gt(SeckillVoucher::getStock, 0);
+        seckillVoucher.setStock(seckillVoucher.getStock() - 1);
+        int rows = seckillVoucherMapper.update(seckillVoucher, wrapper);
+        if (rows != 1) {
+            return null;
+        }
 
-          一人一单逻辑
-               方法一: 下面这种做法: 在代码层面判断VoucherOrder表中是否存在同一用户的订单
-               方法二: 在数据库层面添加联合唯一索引(user_id与voucher_id)
-         */
+        一人一单逻辑
+           方法一: 下面这种做法: 在代码层面判断VoucherOrder表中是否存在同一用户的订单
+           方法二: 在数据库层面添加联合唯一索引(user_id与voucher_id)
         Long userId = UserHolder.getUser().getId();
         synchronized (userId.toString().intern()) { // 通过字符串的 intern 方法来确保同一用户 ID 的字符串在 JVM 中是唯一的
-            // 获取代理对象 (事务), 直接调用this.createVoucherOrder会造成Spring事务失效
+        // 获取代理对象 (事务), 直接调用this.createVoucherOrder会造成Spring事务失效
+        IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();
+        return proxy.createVoucherOrder(voucherId);
+        }
+
+         使用自己定义的分布式锁
+         Long userId = UserHolder.getUser().getId();
+         SimpleRedisLock lock = new SimpleRedisLock("order:" + userId, stringRedisTemplate);
+         boolean isLock = lock.tryLock(2);
+         if (!isLock) {
+         return null;
+         }
+         try {
+         IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();
+         return proxy.createVoucherOrder(voucherId);
+         } catch (IllegalStateException e) {
+         throw new RuntimeException(e);
+         } finally {
+         lock.unLock();
+         }
+
+        */
+
+        // 一人一单实现逻辑
+        Long userId = UserHolder.getUser().getId();
+        RLock lock = redissonClient.getLock("lock:order:" + userId);
+
+        boolean isLock = lock.tryLock();
+        if (!isLock) {
+            return null;
+        }
+
+        try {
             IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();
             return proxy.createVoucherOrder(voucherId);
+        } finally {
+            if (lock.isLocked()) {
+                lock.unlock();
+            }
         }
+
     }
 
     @Transactional
