@@ -1,10 +1,12 @@
 package com.hmdp.service.impl;
 
+import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.entity.VoucherOrder;
 import com.hmdp.mapper.SeckillVoucherMapper;
 import com.hmdp.mapper.VoucherOrderMapper;
+import com.hmdp.mq.MqSender;
 import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisIdWorker;
@@ -46,21 +48,24 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         SECKILL_SCRIPT.setLocation(new ClassPathResource("seckill.lua"));
     }
 
+    private final MqSender mqSender;
+
     public VoucherOrderServiceImpl(SeckillVoucherMapper seckillVoucherMapper,
                                    RedisIdWorker redisIdWorker,
                                    VoucherOrderMapper voucherOrderMapper,
-                                   StringRedisTemplate stringRedisTemplate, RedissonClient redissonClient) {
+                                   StringRedisTemplate stringRedisTemplate, RedissonClient redissonClient, MqSender mqSender) {
         this.seckillVoucherMapper = seckillVoucherMapper;
         this.redisIdWorker = redisIdWorker;
         this.voucherOrderMapper = voucherOrderMapper;
         this.stringRedisTemplate = stringRedisTemplate;
         this.redissonClient = redissonClient;
+        this.mqSender = mqSender;
     }
 
     /**
      * QPS:
-     *      优化前: 分布式锁 + 乐观锁 , QPS 1865 平均值 324ms
-     *      优化后:
+     *      优化前: 分布式锁 + 乐观锁 , QPS 1265 平均值 324ms
+     *      优化后: 消息队列 + lua脚本, QPS 2152 平均值 200ms
      * @param voucherId 优惠券Id
      * @return orderId 订单Id
      */
@@ -78,12 +83,19 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         if (result.intValue() != 0) {
             return null; // 抢购失败, result = 1 表示库存不足, 2 表示 重复下单
         }
-        //TODO 保存阻塞队列
-        Long orderId = redisIdWorker.nextId("order");
 
+        // 3. 创建订单
+        Long orderId = redisIdWorker.nextId("order");
+        VoucherOrder voucherOrder = new VoucherOrder();
+        voucherOrder.setId(orderId);
+        voucherOrder.setUserId(userId);
+        voucherOrder.setVoucherId(voucherId);
+        voucherOrder.setCreateTime(LocalDateTime.now());
+
+        // 4.将消息放入消息队列中
+        mqSender.sendSeckillMessage(JSON.toJSONString(voucherOrder));
         return orderId;
     }
-
 
 //    @Override
 //    public Long seckillVoucher(Long voucherId) {
@@ -163,7 +175,6 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 //        }
 //
 //    }
-
 
     @Transactional
     @Override
