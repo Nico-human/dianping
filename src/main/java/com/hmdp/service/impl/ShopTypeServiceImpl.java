@@ -39,6 +39,7 @@ public class ShopTypeServiceImpl extends ServiceImpl<ShopTypeMapper, ShopType> i
     public List<ShopType> queryTypeList() {
         List<String> shopTypeList = stringRedisTemplate.opsForList().range(RedisConstants.CACHE_TYPE_KEY, 0, -1);
 
+        // 如果缓存中有
         if (shopTypeList != null && !shopTypeList.isEmpty()) {
             stringRedisTemplate.expire(RedisConstants.CACHE_TYPE_KEY, RedisConstants.CACHE_TYPE_TTL, TimeUnit.HOURS);
             return shopTypeList.stream()
