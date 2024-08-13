@@ -1,9 +1,11 @@
 package com.hmdp.controller;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.Blog;
 import com.hmdp.service.IBlogService;
+import com.hmdp.utils.SystemConstants;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
@@ -30,7 +32,6 @@ public class BlogController {
         return Result.ok(blogId);
     }
 
-    // TODO
     @PutMapping("/like/{id}")
     public Result<Boolean> likeBlog(@PathVariable("id") Long id) {
         // 修改点赞数量
@@ -59,6 +60,19 @@ public class BlogController {
     @GetMapping("/likes/{id}")
     public Result<List<UserDTO>> queryBlogLikes(@PathVariable Long id) {
         return Result.ok(blogService.queryBlogLikes(id));
+    }
+
+    // BlogController  根据id查询博主的探店笔记
+    @GetMapping("/of/user")
+    public Result<List<Blog>> queryBlogByUserId(
+            @RequestParam(value = "current", defaultValue = "1") Integer current,
+            @RequestParam("id") Long id) {
+        // 根据用户查询
+        Page<Blog> page = blogService.query()
+                .eq("user_id", id).page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
+        // 获取当前页数据
+        List<Blog> records = page.getRecords();
+        return Result.ok(records);
     }
 
 }
